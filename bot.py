@@ -115,6 +115,6 @@ def main():
             json.dump(current_tags, f)
             print("7. Память сохранена.")
     else:
-        print("6. Топ НЕ изменился. Ничего не 
+        print("6. Топ НЕ изменился. Ничего не делаю.") 
 if __name__ == "__main__":
     main()
