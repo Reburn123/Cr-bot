@@ -80,35 +80,41 @@ def main():
     previous_tags = []
     if os.path.exists(STATE_FILE):
         print("3. Файл памяти найден. Читаю...")
-        with open(STATE_FILE, 'r') as f:
-            previous_tags = json.load(f)
+        try:
+            with open(STATE_FILE, 'r') as f:
+                previous_tags = json.load(f)
+        except Exception as e:
+            print(f"Ошибка чтения памяти: {e}")
+            previous_tags = []
     else:
         print("3. Файла памяти нет. Считаю топ пустым.")
-
-    print(f"4. Текущий топ: {current_tags}")
-    print(f"5. Старый топ: {previous_tags}")
 
     if current_tags != previous_tags:
         print("6. Топ изменился! Отправляю в ТГ...")
         header_url = f"https://api.telegram.org/bot{TG_BOT_TOKEN}/sendMessage"
         res_header = requests.post(header_url, data={'chat_id': TG_CHANNEL_ID, 'text': "🚨 <b>Обновление Топ-10!</b>", 'parse_mode': 'HTML'})
         
-        # Сюда выведется ответ Телеграма (ошибка или успех)
-        print("ОТВЕТ ТЕЛЕГРАМА:", res_header.text)
-        
+        # Пост-заголовок улетел, теперь очередь картинок
         for player in current_top:
-            deck = get_player_deck(player['tag'])
-            if deck:
-                img_path = build_deck_image(deck, player['rank'])
-                caption = f"🏆 <b>Топ {player['rank']}</b>\n👤 {player['name']}"
-                send_telegram_photo(img_path, caption)
-                os.remove(img_path)
-                time.sleep(2)
+            try:
+                print(f"Обрабатываю игрока: {player['name']}...")
+                deck = get_player_deck(player['tag'])
+                if deck:
+                    img_path = build_deck_image(deck, player['rank'])
+                    caption = f"🏆 <b>Топ {player['rank']}</b>\n👤 {player['name']}"
+                    send_telegram_photo(img_path, caption)
+                    os.remove(img_path)
+                    time.sleep(2)
+                else:
+                    print(f"У игрока {player['name']} нет колоды или профиль закрыт.")
+            except Exception as e:
+                print(f"ПРОБЛЕМА С ИГРОКОМ {player['name']}: {e}")
+                continue # Если упал один - идем к следующему
                 
         with open(STATE_FILE, 'w') as f:
             json.dump(current_tags, f)
             print("7. Память сохранена.")
     else:
-        print("6. Топ НЕ изменился. Ничего не делаю.")
+        print("6. Топ НЕ изменился. Ничего не 
 if __name__ == "__main__":
     main()
