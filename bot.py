@@ -3,8 +3,10 @@ import time
 import json
 import os
 import html
+import urllib.request
 from io import BytesIO
 from PIL import Image, ImageDraw, ImageFont
+from collections import Counter
 
 # Настройки
 CR_API_TOKEN = os.environ.get("CR_API_TOKEN")
@@ -18,21 +20,17 @@ HEADERS = {
 }
 STATE_FILE = "last_top10.json"
 
-# УМНАЯ ЗАГРУЗКА ШРИФТОВ
-def get_font(font_name, size):
-    # Возможные пути, где могут лежать шрифты на сервере Гитхаба
-    paths = [
-        f"/usr/share/fonts/opentype/noto/{font_name}",
-        f"/usr/share/fonts/truetype/noto/{font_name}",
-        f"/usr/share/fonts/truetype/dejavu/{font_name}",
-        f"./{font_name}" # Если ты сам закинул шрифт в репозиторий
-    ]
-    for path in paths:
+# КАЧАЕМ ЖИРНЫЙ ШРИФТ С ПОДДЕРЖКОЙ ИЕРОГЛИФОВ (NotoSansSC-Bold)
+FONT_URL = "https://github.com/googlefonts/noto-cjk/raw/main/Sans/OTF/SimplifiedChinese/NotoSansSC-Bold.otf"
+FONT_PATH = "NotoSansSC-Bold.otf"
+
+def download_font():
+    if not os.path.exists(FONT_PATH):
         try:
-            return ImageFont.truetype(path, size)
-        except IOError:
-            continue
-    return ImageFont.load_default() # Если вообще ничего не нашли
+            print("Скачиваю шрифт (может занять 5-10 сек)...")
+            urllib.request.urlretrieve(FONT_URL, FONT_PATH)
+        except Exception as e:
+            print(f"Не смог скачать шрифт: {e}")
 
 def get_top_10():
     try:
@@ -43,48 +41,62 @@ def get_top_10():
     except:
         return []
 
-def get_player_deck(player_tag):
-    tag_encoded = player_tag.replace("#", "%23")
-    try:
-        res = requests.get(f"{BASE_URL}/players/{tag_encoded}", headers=HEADERS, timeout=10)
-        if res.status_code == 200:
-            return res.json().get("currentDeck", [])
-    except:
-        pass
-    return []
-
-def get_win_rate(player_tag):
+def get_main_deck_and_winrate(player_tag):
     tag_encoded = player_tag.replace("#", "%23")
     try:
         res = requests.get(f"{BASE_URL}/players/{tag_encoded}/battlelog", headers=HEADERS, timeout=10)
         if res.status_code != 200:
-            return None, 0
+            return None, None, 0
             
         battles = res.json()
-        wins = 0
-        total = 0
+        valid_decks = []
         
         for battle in battles:
-            if battle.get('type') != 'pathOfLegend':
-                continue
-            if 'team' not in battle or 'opponent' not in battle:
+            # Отсеиваем испытания и ивенты
+            if battle.get('type') not in ['PvP', 'pathOfLegend']:
                 continue
                 
-            my_crowns = battle['team'][0].get('crowns', 0)
-            opp_crowns = battle['opponent'][0].get('crowns', 0)
+            # ЖЕСТКАЯ ЗАЩИТА ОТ БИТОГО API (Тест 1)
+            if not battle.get('team') or not battle.get('opponent') or len(battle['opponent']) == 0:
+                continue
+                
+            team_cards = battle['team'][0].get('cards', [])
+            if len(team_cards) != 8:
+                continue
+                
+            card_ids = tuple(sorted([c['id'] for c in team_cards]))
+            is_win = battle['team'][0].get('crowns', 0) > battle['opponent'][0].get('crowns', 0)
             
-            if my_crowns > opp_crowns:
-                wins += 1
-            total += 1
+            valid_decks.append({
+                'key': card_ids,
+                'cards': team_cards,
+                'is_win': is_win
+            })
             
-        if total < 10:
-            return None, total
+        if not valid_decks:
+            return None, None, 0
             
-        return round((wins / total) * 100, 1), total
-    except:
-        return None, 0
+        deck_counts = Counter([d['key'] for d in valid_decks])
+        most_common_key = deck_counts.most_common(1)[0][0]
+        
+        main_deck = None
+        wins = 0
+        total = 0
+        for d in valid_decks:
+            if d['key'] == most_common_key:
+                main_deck = d['cards']
+                total += 1
+                if d['is_win']:
+                    wins += 1
+                    
+        win_rate = round((wins / total) * 100, 1) if total > 0 else None
+        return main_deck, win_rate, total
+    except Exception as e:
+        print(f"Ошибка парсинга боев: {e}")
+        return None, None, 0
 
 def get_archetype(cards):
+    if not cards: return "Unknown"
     names = [c['name'] for c in cards]
     if "Hog Rider" in names and "Earthquake" in names: return "Hog EQ"
     if "Golem" in names: return "Golem"
@@ -96,23 +108,84 @@ def get_archetype(cards):
     if "Miner" in names and "Wall Breakers" in names: return "Miner WB"
     return "Meta Deck"
 
-def build_deck_image(cards, rank, name, trophies, win_rate, battles, archetype, prev_wr):
-    w, h = 150, 180
-    padding = 20
-    img_width = w * 4 + padding * 2
-    img_height = h * 2 + 160 
-    
-    base = Image.new('RGB', (img_width, img_height), color=(18, 24, 38))
-    draw = ImageDraw.Draw(base)
-    
-    # Используем нашу умную загрузку (NotoSansCJK-Bold.ttc точно есть на Ubuntu)
-    font_main = get_font("NotoSansCJK-Bold.ttc", 22)
-    font_sub = get_font("NotoSansCJK-Regular.ttc", 16)
-    font_wr = get_font("NotoSansCJK-Bold.ttc", 42)
+def get_font(size):
+    try:
+        return ImageFont.truetype(FONT_PATH, size)
+    except:
+        try:
+            return ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", size)
+        except:
+            return ImageFont.load_default()
 
-    # Верхняя панель
-    draw.rounded_rectangle([10, 10, img_width - 10, 70], radius=10, fill=(28, 35, 55), outline=(255, 215, 0), width=2)
-    draw.text((padding + 10, 25), f"#{rank}  {name}", font=font_main, fill=(255, 255, 255))
+def build_deck_image(deck, rank, name, trophies, win_rate, battles, archetype, prev_wr):
+    if not deck:
+        deck = []
+        
+    w, h = 160, 192
+    padding = 30
+    img_width = w * 4 + padding * 2
+    img_height = h * 2 + 220 
+    
+    base = Image.new('RGB', (img_width, img_height), color=(11, 16, 30))
+    draw = ImageDraw.Draw(base)
+    for i in range(img_height):
+        color = (11 + int(i * 0.02), 16 + int(i * 0.03), 30 + int(i * 0.05))
+        draw.line([(0, i), (img_width, i)], fill=color)
+    
+    font_main = get_font(22)
+    font_sub = get_font(16)
+    font_wr = get_font(55)
+    font_rank = get_font(28)
+
+    draw.rounded_rectangle([15, 15, img_width - 15, 85], radius=15, fill=(22, 28, 45), outline=(245, 194, 66), width=3)
+    
+    # УМНАЯ ОБРЕЗКА НИКА (Тест 3)
+    rank_text = f"#{rank}"
+    bbox_rank = draw.textbbox((0, 0), rank_text, font=font_rank)
+    rank_width = bbox_rank[2] - bbox_rank[0]
+    max_name_width = img_width - 30 - rank_width - 60 
+    
+    safe_name = name
+    # Защита от бесконечного цикла, если шрифт совсем не влезает
+    while len(safe_name) > 0 and draw.textbbox((0, 0), safe_name + "...", font=font_main)[2] > max_name_width:
+        safe_name = safe_name[:-1]
+    if len(safe_name) < len(name):
+        safe_name += "..."
+        
+    draw.text((30, 30), safe_name, font=font_main, fill=(255, 255, 255))
+    
+    safe_trophies = trophies if trophies else 0
+    draw.text((30, 55), f"Trophies: {safe_trophies} | {archetype}", font=font_sub, fill=(180, 190, 210))
+    
+    draw.text((img_width - 30 - rank_width, 35), rank_text, font=font_rank, fill=(245, 194, 66))
+
+    start_y = 110
+    for index in range(8): 
+        x = padding + (index % 4) * w
+        y = start_y + (index // 4) * h
+        
+        draw.rounded_rectangle([x + 4, y + 4, x + w + 4, y + h + 4], radius=10, fill=(0, 0, 0))
+        
+        if index < len(deck):
+            card = deck[index]
+            img_url = card.get('iconUrls', {}).get('medium') or card.get('iconUrls', {}).get('default')
+            try:
+                response = requests.get(img_url, timeout=5)
+                card_img = Image.open(BytesIO(response.content)).convert("RGBA").resize((w, h))
+                mask = Image.new("L", (w, h), 0)
+                mask_draw = ImageDraw.Draw(mask)
+                mask_draw.rounded_rectangle([0, 0, w, h], radius=10, fill=255)
+                base.paste(card_img, (x, y), mask)
+                draw.rounded_rectangle([x, y, x + w, y + h], radius=10, outline=(245, 194, 66), width=3)
+            except:
+                draw.rounded_rectangle([x, y, x + w, y + h], radius=10, fill=(40, 45, 60), outline=(245, 194, 66), width=3)
+                draw.text((x + w//4, y + h//2 - 10), "NO IMG", font=font_sub, fill=(150, 150, 150))
+        else:
+            draw.rounded_rectangle([x, y, x + w, y + h], radius=10, fill=(30, 35, 50), outline=(100, 100, 100), width=2)
+
+    badge_w, badge_h = 180, 70
+    badge_x = img_width - badge_w - 20
+    badge_y = img_height - 100
     
     if win_rate is None:
         wr_text = "N/A"
@@ -120,55 +193,34 @@ def build_deck_image(cards, rank, name, trophies, win_rate, battles, archetype, 
         trend = ""
     else:
         wr_text = f"{win_rate}%"
-        if win_rate < 50.0: wr_color = (255, 60, 60)
-        elif win_rate > 51.0: wr_color = (50, 255, 50)
-        else: wr_color = (180, 180, 180)
+        if win_rate < 50.0: wr_color = (231, 76, 60)
+        elif win_rate > 51.0: wr_color = (46, 204, 113)
+        else: wr_color = (149, 165, 166)
         
         trend = ""
         trend_color = (255, 255, 255)
         if isinstance(prev_wr, (int, float)) and prev_wr != win_rate:
             if win_rate > prev_wr:
                 trend = "▲"
-                trend_color = (50, 255, 50)
+                trend_color = (46, 204, 113)
             else:
                 trend = "▼"
-                trend_color = (255, 60, 60)
+                trend_color = (231, 76, 60)
 
-    bbox = draw.textbbox((0, 0), wr_text, font=font_wr)
-    wr_width = bbox[2] - bbox[0]
-    draw.text((img_width - 40 - wr_width, 15), wr_text, font=font_wr, fill=wr_color)
+    draw.rounded_rectangle([badge_x, badge_y, badge_x + badge_w, badge_y + badge_h], radius=15, fill=(15, 20, 35), outline=wr_color, width=3)
+    
+    bbox_wr = draw.textbbox((0, 0), wr_text, font=font_wr)
+    wr_w = bbox_wr[2] - bbox_wr[0]
+    wr_h = bbox_wr[3] - bbox_wr[1]
+    draw.text((badge_x + (badge_w - wr_w)//2 - (15 if trend else 0), badge_y + (badge_h - wr_h)//2 - 8), wr_text, font=font_wr, fill=wr_color)
+    
     if trend:
-        draw.text((img_width - 35, 25), trend, font=font_main, fill=trend_color)
+        draw.text((badge_x + badge_w - 35, badge_y + 20), trend, font=font_main, fill=trend_color)
 
-    # Карты
-    start_y = 90
-    for index, card in enumerate(cards):
-        img_url = card.get('iconUrls', {}).get('medium') or card.get('iconUrls', {}).get('default')
-        if img_url:
-            try:
-                response = requests.get(img_url, timeout=5)
-                response.raise_for_status()
-                card_img = Image.open(BytesIO(response.content)).convert("RGBA").resize((w, h))
-                
-                col = index % 4
-                row = index // 4
-                x = padding + col * w
-                y = start_y + row * h
-                
-                draw.rectangle([x + 3, y + 3, x + w + 3, y + h + 3], fill=(10, 10, 15))
-                base.paste(card_img, (x, y), card_img)
-                draw.rectangle([x, y, x + w, y + h], outline=(255, 215, 0), width=2)
-            except:
-                pass
-
-    # Низ
-    y_bottom = img_height - 55
-    draw.rounded_rectangle([10, y_bottom, img_width - 10, img_height - 10], radius=10, fill=(28, 35, 55), outline=(255, 215, 0), width=2)
-    
-    draw.text((padding + 10, y_bottom + 12), f"Trophies: {trophies}  |  {archetype}", font=font_sub, fill=(255, 255, 255))
-    
-    if battles < 10:
-        draw.text((img_width - 160, y_bottom + 12), f"Battles: {battles}", font=font_sub, fill=(200, 100, 100))
+    if battles > 0:
+        draw.text((30, img_height - 75), f"Games on this deck: {battles}", font=font_sub, fill=(150, 160, 180))
+    else:
+        draw.text((30, img_height - 75), f"No valid battles", font=font_sub, fill=(150, 160, 180))
 
     file_path = f"deck_{rank}.png"
     base.save(file_path)
@@ -181,6 +233,8 @@ def send_telegram_photo(photo_path, caption):
         print("ОТВЕТ ТГ:", res.text)
 
 def main():
+    download_font() 
+    
     print("1. Запрашиваю топ...")
     current_top = get_top_10()
     if not current_top:
@@ -203,29 +257,36 @@ def main():
         new_data = {}
         for player in current_top:
             try:
-                print(f"Обрабатываю: {player['name']}...")
-                deck = get_player_deck(player['tag'])
-                if deck:
-                    wr, battles = get_win_rate(player['tag'])
-                    archetype = get_archetype(deck)
-                    
-                    prev_wr = None
-                    if player['tag'] in previous_data:
-                        prev_wr = previous_data[player['tag']].get('win_rate')
-                    
-                    img_path = build_deck_image(
-                        deck, player['rank'], player['name'], 
-                        player['eloRating'], wr, battles, archetype, prev_wr
-                    )
-                    
-                    safe_name = html.escape(player['name'])
-                    caption = f"🏆 <b>Топ {player['rank']}</b>\n👤 {safe_name}\n🏅 {player['eloRating']} кубков"
-                    
-                    send_telegram_photo(img_path, caption)
-                    os.remove(img_path)
-                    time.sleep(3)
-                    
-                    new_data[player['tag']] = {'win_rate': wr}
+                print(f"Анализирую бои: {player['name']}...")
+                
+                main_deck, wr, battles = get_main_deck_and_winrate(player['tag'])
+                
+                if not main_deck:
+                    res = requests.get(f"{BASE_URL}/players/{player['tag'].replace('#', '%23')}", headers=HEADERS)
+                    if res.status_code == 200:
+                        main_deck = res.json().get("currentDeck", [])
+                
+                archetype = get_archetype(main_deck)
+                
+                prev_wr = None
+                if player['tag'] in previous_data:
+                    prev_wr = previous_data[player['tag']].get('win_rate')
+                
+                safe_elo = player.get('eloRating', player.get('trophies', 0))
+                
+                img_path = build_deck_image(
+                    main_deck, player['rank'], player['name'], 
+                    safe_elo, wr, battles, archetype, prev_wr
+                )
+                
+                safe_name = html.escape(player['name'])
+                caption = f"🏆 <b>Топ {player['rank']}</b>\n👤 {safe_name}\n🏅 {safe_elo} кубков\n\n📊 <i>Винрейт по основной колоде</i>"
+                
+                send_telegram_photo(img_path, caption)
+                os.remove(img_path)
+                time.sleep(3)
+                
+                new_data[player['tag']] = {'win_rate': wr}
             except Exception as e:
                 print(f"ОШИБКА С {player['name']}: {e}")
                 continue 
