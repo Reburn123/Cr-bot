@@ -25,6 +25,6 @@ jobs:
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
-          git add last_top10.json
+          git add .
           git commit -m "Update state" || echo "No changes"
           git push
