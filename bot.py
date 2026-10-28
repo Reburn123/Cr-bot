@@ -63,9 +63,11 @@ def main():
             previous_tags = json.load(f)
             
     if current_tags != previous_tags:
-header_url = f"https://api.telegram.org/bot{TG_BOT_TOKEN}/sendMessage"
+        header_url = f"https://api.telegram.org/bot{TG_BOT_TOKEN}/sendMessage"
         res_header = requests.post(header_url, data={'chat_id': TG_CHANNEL_ID, 'text': "🚨 <b>Обновление Топ-10!</b>", 'parse_mode': 'HTML'})
-        print("ОТВЕТ ТЕЛЕГРАМА НА ТЕКСТ:", res_header.text) # <--- И ВОТ ЭТА
+        
+        # Вот эта строчка выведет ответ Телеграма в логи Гитхаба
+        print("ОТВЕТ ТЕЛЕГРАМА НА ТЕКСТ:", res_header.text)
         
         for player in current_top:
             deck = get_player_deck(player['tag'])
