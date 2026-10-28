@@ -18,15 +18,29 @@ HEADERS = {
 }
 STATE_FILE = "last_top10.json"
 
+# УМНАЯ ЗАГРУЗКА ШРИФТОВ
+def get_font(font_name, size):
+    # Возможные пути, где могут лежать шрифты на сервере Гитхаба
+    paths = [
+        f"/usr/share/fonts/opentype/noto/{font_name}",
+        f"/usr/share/fonts/truetype/noto/{font_name}",
+        f"/usr/share/fonts/truetype/dejavu/{font_name}",
+        f"./{font_name}" # Если ты сам закинул шрифт в репозиторий
+    ]
+    for path in paths:
+        try:
+            return ImageFont.truetype(path, size)
+        except IOError:
+            continue
+    return ImageFont.load_default() # Если вообще ничего не нашли
+
 def get_top_10():
     try:
         res = requests.get(f"{BASE_URL}/locations/global/pathoflegend/players", headers=HEADERS, params={"limit": 10}, timeout=10)
         if res.status_code != 200:
-            print(f"⚠️ API вернул {res.status_code}")
             return []
         return res.json().get("items", [])
-    except Exception as e:
-        print(f"Ошибка сети: {e}")
+    except:
         return []
 
 def get_player_deck(player_tag):
@@ -53,8 +67,6 @@ def get_win_rate(player_tag):
         for battle in battles:
             if battle.get('type') != 'pathOfLegend':
                 continue
-            
-            # ЗАЩИТА ОТ БИТЫХ ДАННЫХ (Баг 3)
             if 'team' not in battle or 'opponent' not in battle:
                 continue
                 
@@ -93,16 +105,15 @@ def build_deck_image(cards, rank, name, trophies, win_rate, battles, archetype, 
     base = Image.new('RGB', (img_width, img_height), color=(18, 24, 38))
     draw = ImageDraw.Draw(base)
     
-    # Используем только Noto, чтобы не словить квадраты с Supercell-Magic
-    font_main = ImageFont.truetype("/usr/share/fonts/truetype/noto/NotoSansCJK-Bold.ttc", 22)
-    font_sub = ImageFont.truetype("/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc", 16)
-    font_wr = ImageFont.truetype("/usr/share/fonts/truetype/noto/NotoSansCJK-Bold.ttc", 42)
+    # Используем нашу умную загрузку (NotoSansCJK-Bold.ttc точно есть на Ubuntu)
+    font_main = get_font("NotoSansCJK-Bold.ttc", 22)
+    font_sub = get_font("NotoSansCJK-Regular.ttc", 16)
+    font_wr = get_font("NotoSansCJK-Bold.ttc", 42)
 
     # Верхняя панель
     draw.rounded_rectangle([10, 10, img_width - 10, 70], radius=10, fill=(28, 35, 55), outline=(255, 215, 0), width=2)
     draw.text((padding + 10, 25), f"#{rank}  {name}", font=font_main, fill=(255, 255, 255))
     
-    # Логика винрейта и стрелок (Исправлен Баг 4)
     if win_rate is None:
         wr_text = "N/A"
         wr_color = (150, 150, 150)
@@ -115,7 +126,6 @@ def build_deck_image(cards, rank, name, trophies, win_rate, battles, archetype, 
         
         trend = ""
         trend_color = (255, 255, 255)
-        # Проверяем, что prev_wr - это число, а не None
         if isinstance(prev_wr, (int, float)) and prev_wr != win_rate:
             if win_rate > prev_wr:
                 trend = "▲"
@@ -130,7 +140,7 @@ def build_deck_image(cards, rank, name, trophies, win_rate, battles, archetype, 
     if trend:
         draw.text((img_width - 35, 25), trend, font=font_main, fill=trend_color)
 
-    # Отрисовка карт
+    # Карты
     start_y = 90
     for index, card in enumerate(cards):
         img_url = card.get('iconUrls', {}).get('medium') or card.get('iconUrls', {}).get('default')
@@ -151,11 +161,10 @@ def build_deck_image(cards, rank, name, trophies, win_rate, battles, archetype, 
             except:
                 pass
 
-    # Нижняя панель (Убрали эмодзи кубка, исправлен Баг 1)
+    # Низ
     y_bottom = img_height - 55
     draw.rounded_rectangle([10, y_bottom, img_width - 10, img_height - 10], radius=10, fill=(28, 35, 55), outline=(255, 215, 0), width=2)
     
-    # Пишем "Trophies:" вместо эмодзи
     draw.text((padding + 10, y_bottom + 12), f"Trophies: {trophies}  |  {archetype}", font=font_sub, fill=(255, 255, 255))
     
     if battles < 10:
