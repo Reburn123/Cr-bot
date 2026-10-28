@@ -50,7 +50,8 @@ def build_deck_image(cards, rank):
 def send_telegram_photo(photo_path, caption):
     url = f"https://api.telegram.org/bot{TG_BOT_TOKEN}/sendPhoto"
     with open(photo_path, 'rb') as photo:
-        requests.post(url, files={'photo': photo}, data={'chat_id': TG_CHANNEL_ID, 'caption': caption, 'parse_mode': 'HTML'})
+        res = requests.post(url, files={'photo': photo}, data={'chat_id': TG_CHANNEL_ID, 'caption': caption, 'parse_mode': 'HTML'})
+        print("ОТВЕТ ТЕЛЕГРАМА НА ФОТО:", res.text) # <--- ВОТ ЭТА ХУЙНЯ ПОКАЖЕТ ОШИБКУ
 
 def main():
     current_top = get_top_10()
@@ -62,8 +63,9 @@ def main():
             previous_tags = json.load(f)
             
     if current_tags != previous_tags:
-        header_url = f"https://api.telegram.org/bot{TG_BOT_TOKEN}/sendMessage"
-        requests.post(header_url, data={'chat_id': TG_CHANNEL_ID, 'text': "🚨 <b>Обновление Топ-10!</b>", 'parse_mode': 'HTML'})
+header_url = f"https://api.telegram.org/bot{TG_BOT_TOKEN}/sendMessage"
+        res_header = requests.post(header_url, data={'chat_id': TG_CHANNEL_ID, 'text': "🚨 <b>Обновление Топ-10!</b>", 'parse_mode': 'HTML'})
+        print("ОТВЕТ ТЕЛЕГРАМА НА ТЕКСТ:", res_header.text) # <--- И ВОТ ЭТА
         
         for player in current_top:
             deck = get_player_deck(player['tag'])
