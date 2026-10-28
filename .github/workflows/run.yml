@@ -11,17 +11,22 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v3
+      
       - uses: actions/setup-python@v4
         with:
           python-version: '3.9'
-      - run: pip install requests pillow
+          
+      - name: Install dependencies
+        run: pip install requests pillow
+        
       - name: Run bot
         env:
           CR_API_TOKEN: ${{ secrets.CR_API_TOKEN }}
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
           TG_CHANNEL_ID: ${{ secrets.TG_CHANNEL_ID }}
         run: python bot.py
-      - name: Save memory (обновляем файл памяти)
+        
+      - name: Save memory
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
