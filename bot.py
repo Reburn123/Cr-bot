@@ -19,6 +19,8 @@ STATE_FILE = "last_top10.json"
 
 def get_top_10():
     res = requests.get(f"{BASE_URL}/locations/global/rankings/players", headers=HEADERS, params={"limit": 10}, timeout=10)
+    print("СТАТУС ОТ КЛЕШ РОЯЛЬ:", res.status_code)
+    print("ЧТО ОТВЕТИЛ СЕРВЕР:", res.text) # <--- ВОТ ЭТО ПОКАЖЕТ ОШИБКУ
     res.raise_for_status()
     return res.json().get("items", [])
 
