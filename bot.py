@@ -19,9 +19,15 @@ HEADERS = {
 STATE_FILE = "last_top10.json"
 
 def get_top_10():
-    res = requests.get(f"{BASE_URL}/locations/global/pathoflegend/players", headers=HEADERS, params={"limit": 10}, timeout=10)
-    res.raise_for_status()
-    return res.json().get("items", [])
+    try:
+        res = requests.get(f"{BASE_URL}/locations/global/pathoflegend/players", headers=HEADERS, params={"limit": 10}, timeout=10)
+        if res.status_code != 200:
+            print(f"⚠️ Сервер API вернул ошибку {res.status_code}. Пропускаю этот запуск.")
+            return []
+        return res.json().get("items", [])
+    except Exception as e:
+        print(f"⚠️ Ошибка сети: {e}")
+        return []
 
 def get_player_deck(player_tag):
     tag_encoded = player_tag.replace("#", "%23")
