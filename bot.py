@@ -54,20 +54,29 @@ def send_telegram_photo(photo_path, caption):
         print("ОТВЕТ ТЕЛЕГРАМА НА ФОТО:", res.text) # <--- ВОТ ЭТА ХУЙНЯ ПОКАЖЕТ ОШИБКУ
 
 def main():
+    print("1. Начинаю запрос к API...")
     current_top = get_top_10()
+    print(f"2. API вернул {len(current_top)} игроков.")
     current_tags = [p['tag'] for p in current_top]
     
     previous_tags = []
     if os.path.exists(STATE_FILE):
+        print("3. Файл памяти найден. Читаю...")
         with open(STATE_FILE, 'r') as f:
             previous_tags = json.load(f)
-            
+    else:
+        print("3. Файла памяти нет. Считаю топ пустым.")
+
+    print(f"4. Текущий топ: {current_tags}")
+    print(f"5. Старый топ: {previous_tags}")
+
     if current_tags != previous_tags:
+        print("6. Топ изменился! Отправляю в ТГ...")
         header_url = f"https://api.telegram.org/bot{TG_BOT_TOKEN}/sendMessage"
         res_header = requests.post(header_url, data={'chat_id': TG_CHANNEL_ID, 'text': "🚨 <b>Обновление Топ-10!</b>", 'parse_mode': 'HTML'})
         
-        # Вот эта строчка выведет ответ Телеграма в логи Гитхаба
-        print("ОТВЕТ ТЕЛЕГРАМА НА ТЕКСТ:", res_header.text)
+        # Сюда выведется ответ Телеграма (ошибка или успех)
+        print("ОТВЕТ ТЕЛЕГРАМА:", res_header.text)
         
         for player in current_top:
             deck = get_player_deck(player['tag'])
@@ -80,6 +89,6 @@ def main():
                 
         with open(STATE_FILE, 'w') as f:
             json.dump(current_tags, f)
-
-if __name__ == "__main__":
-    main()
+            print("7. Память сохранена.")
+    else:
+        print("6. Топ НЕ изменился. Ничего не делаю.")
