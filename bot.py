@@ -25,11 +25,26 @@ def get_top_10():
     res.raise_for_status()
     return res.json().get("items", [])
 
-def get_player_deck(player_tag):
-    tag_encoded = player_tag.replace("#", "%23")
-    res = requests.get(f"{BASE_URL}/players/{tag_encoded}", headers=HEADERS, timeout=10)
-    res.raise_for_status()
-    return res.json().get("currentDeck", [])
+def build_deck_image(cards, rank):
+    w, h = 150, 180
+    grid_img = Image.new('RGB', (w * 4, h * 2), color=(40, 40, 40))
+    for index, card in enumerate(cards):
+        # Берем официальную ссылку на картинку прямо из API
+        img_url = card.get('iconUrls', {}).get('medium')
+        if not img_url:
+            continue
+        try:
+            response = requests.get(img_url, timeout=5)
+            response.raise_for_status()
+            card_img = Image.open(BytesIO(response.content)).convert("RGBA").resize((w, h))
+            col = index % 4
+            row = index // 4
+            grid_img.paste(card_img, (col * w, row * h), card_img)
+        except Exception as e:
+            print(f"Ошибка загрузки картинки {card['name']}: {e}")
+    file_path = f"deck_{rank}.png"
+    grid_img.save(file_path)
+    return file_path
 
 def build_deck_image(cards, rank):
     w, h = 150, 180
